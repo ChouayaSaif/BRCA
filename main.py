@@ -7,27 +7,52 @@ from sklearn.feature_extraction.text import CountVectorizer
 # --------------------------
 # ER STATUS PREDICTOR CLASS
 # --------------------------
+import pandas as pd
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.ensemble import RandomForestClassifier
+from Bio import SeqIO  # BioPython to parse fasta
+import streamlit as st
+
 class ERStatusPredictor:
-    def __init__(self):
+    def __init__(self, fasta_file='gene.fna', label_dict=None):
+        """
+        :param fasta_file: Path to fasta file containing sequences
+        :param label_dict: Optional dict mapping sequence IDs to labels ('ER_positive' or 'ER_negative')
+                           If None, all sequences will be labeled as negative (default).
+        """
         self.vectorizer = CountVectorizer(analyzer='char', ngram_range=(3, 3))
         self.model = RandomForestClassifier(n_estimators=100, random_state=42)
+        self.fasta_file = fasta_file
+        self.label_dict = label_dict or {}
         self._train_model()
 
     def _train_model(self):
         try:
-            data = pd.read_csv('ER_1000_dna_sequences.csv')
-            data['label'] = data['label'].apply(lambda x: 1 if x == 'ER_positive' else 0)
-            X = data['dna_sequence']
-            y = data['label']
-            X_counts = self.vectorizer.fit_transform(X)
-            self.model.fit(X_counts, y)
+            sequences = []
+            labels = []
+            for record in SeqIO.parse(self.fasta_file, "fasta"):
+                seq_id = record.id
+                seq_str = str(record.seq).upper()
+                sequences.append(seq_str)
+                
+                # Get label from label_dict, default to 'ER_negative'
+                label = self.label_dict.get(seq_id, 'ER_negative')
+                labels.append(1 if label == 'ER_positive' else 0)
+
+            if not sequences:
+                raise ValueError("No sequences found in the fasta file.")
+
+            X_counts = self.vectorizer.fit_transform(sequences)
+            self.model.fit(X_counts, labels)
+
         except Exception as e:
-            st.error(f"Error loading training data: {e}")
+            st.error(f"Error loading training data from fasta: {e}")
 
     def predict(self, dna_sequence: str) -> str:
         X = self.vectorizer.transform([dna_sequence])
         prediction = self.model.predict(X)[0]
         return 'Positive' if prediction == 1 else 'Negative'
+
 
 # Cache the model to load it once per session
 @st.cache_resource
